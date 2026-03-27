@@ -9,19 +9,26 @@ const App = {
   chatHistory: { internal: [], visible: [], metadata: {} },
   uniqueId: null,
   isGenerating: false,
-  chatSocket: null,
-  notebookSocket: null,
   _saveTimer: null,
+  _abortController: null,
 
   // ══════════════════════════════════════════════
   //  INIT
   // ══════════════════════════════════════════════
   async init() {
-    this.bindTabs();
-    this.bindSliders();
-    this.bindEvents();
-    await this.loadStatus();
-    await Promise.all([
+    try {
+      this.bindTabs();
+      this.bindSliders();
+      this.bindEvents();
+    } catch (e) {
+      console.error('Error binding UI:', e);
+    }
+
+    // Load data independently - each call has its own error handling
+    try { await this.loadStatus(); } catch (e) { console.error('loadStatus:', e); }
+
+    // Load all lists in parallel - failures are independent
+    const loads = [
       this.loadModelList(),
       this.loadCharacterList(),
       this.loadPresetList(),
@@ -33,10 +40,11 @@ const App = {
       this.loadPromptList(),
       this.loadImageModelList(),
       this.loadExtensionList(),
-    ]);
-    this.connectChatSocket();
-    this.connectNotebookSocket();
-    this.loadPastChats();
+    ];
+    await Promise.allSettled(loads);
+
+    try { await this.loadPastChats(); } catch (e) { console.error('loadPastChats:', e); }
+
     this.notify('System online. Welcome to SHODAN-NET.', 'info');
   },
 
@@ -48,11 +56,58 @@ const App = {
     if (data) opts.body = JSON.stringify(data);
     try {
       const r = await fetch(url, opts);
+      if (!r.ok) {
+        const text = await r.text();
+        try { return JSON.parse(text); } catch { return null; }
+      }
       return await r.json();
     } catch (e) {
       console.error('API error:', e);
-      this.notify('Connection error: ' + e.message, 'error');
       return null;
+    }
+  },
+
+  // Stream NDJSON from a POST endpoint, calling onMessage for each line
+  async streamPost(url, data, onMessage) {
+    this._abortController = new AbortController();
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+        signal: this._abortController.signal,
+      });
+
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            onMessage(JSON.parse(line));
+          } catch (e) {
+            console.error('Parse error:', e, line);
+          }
+        }
+      }
+      // Process any remaining data
+      if (buffer.trim()) {
+        try { onMessage(JSON.parse(buffer)); } catch {}
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        console.error('Stream error:', e);
+        this.notify('Generation error: ' + e.message, 'error');
+      }
+    } finally {
+      this._abortController = null;
     }
   },
 
@@ -95,59 +150,70 @@ const App = {
   //  EVENT BINDING
   // ══════════════════════════════════════════════
   bindEvents() {
+    const $ = id => document.getElementById(id);
+
+    // Safe event binding helper
+    const on = (id, event, handler) => {
+      const el = $(id);
+      if (el) el.addEventListener(event, handler);
+    };
+
     // Chat
-    const $=id=>document.getElementById(id);
-    $('btn-send').addEventListener('click', () => this.sendMessage());
-    $('chat-input').addEventListener('keydown', e => {
+    on('btn-send', 'click', () => this.sendMessage());
+    on('chat-input', 'keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendMessage(); }
     });
-    $('btn-stop-chat').addEventListener('click', () => this.stopGeneration());
-    $('btn-regenerate').addEventListener('click', () => this.chatAction('regenerate'));
-    $('btn-continue').addEventListener('click', () => this.chatAction('continue'));
-    $('btn-remove-last').addEventListener('click', () => this.removeLastMessage());
-    $('btn-impersonate').addEventListener('click', () => this.chatAction('impersonate'));
-    $('btn-new-chat').addEventListener('click', () => this.newChat());
+    on('btn-stop-chat', 'click', () => this.stopGeneration());
+    on('btn-regenerate', 'click', () => this.chatAction('regenerate'));
+    on('btn-continue', 'click', () => this.chatAction('continue'));
+    on('btn-remove-last', 'click', () => this.removeLastMessage());
+    on('btn-impersonate', 'click', () => this.chatAction('impersonate'));
+    on('btn-new-chat', 'click', () => this.newChat());
 
     // Notebook
-    $('btn-generate-notebook').addEventListener('click', () => this.generateNotebook());
-    $('btn-continue-notebook').addEventListener('click', () => this.continueNotebook());
-    $('btn-stop-notebook').addEventListener('click', () => this.stopGeneration());
+    on('btn-generate-notebook', 'click', () => this.generateNotebook());
+    on('btn-continue-notebook', 'click', () => this.continueNotebook());
+    on('btn-stop-notebook', 'click', () => this.stopGeneration());
 
     // Model
-    $('btn-load-model').addEventListener('click', () => this.loadModel());
-    $('btn-unload-model').addEventListener('click', () => this.unloadModel());
-    $('btn-refresh-models').addEventListener('click', () => this.loadModelList());
-    $('btn-load-lora').addEventListener('click', () => this.loadLoRA());
+    on('btn-load-model', 'click', () => this.loadModel());
+    on('btn-unload-model', 'click', () => this.unloadModel());
+    on('btn-refresh-models', 'click', () => this.loadModelList());
+    on('btn-load-lora', 'click', () => this.loadLoRA());
 
     // Character
-    $('btn-refresh-chars').addEventListener('click', () => this.loadCharacterList());
-    $('character_menu').addEventListener('change', e => this.loadCharacter(e.target.value));
-    $('btn-save-char').addEventListener('click', () => this.saveCharacter());
-    $('btn-delete-char').addEventListener('click', () => this.deleteCharacter());
-    $('btn-load-template').addEventListener('click', () => this.loadTemplate());
+    on('btn-refresh-chars', 'click', () => this.loadCharacterList());
+    on('character_menu', 'change', e => this.loadCharacter(e.target.value));
+    on('btn-save-char', 'click', () => this.saveCharacter());
+    on('btn-delete-char', 'click', () => this.deleteCharacter());
+    on('btn-load-template', 'click', () => this.loadTemplate());
 
     // Presets
-    $('btn-load-preset').addEventListener('click', () => this.loadPreset());
-    $('btn-save-preset').addEventListener('click', () => this.savePreset());
+    on('btn-load-preset', 'click', () => this.loadPreset());
+    on('btn-save-preset', 'click', () => this.savePreset());
 
     // Notebook prompts
-    $('prompt_menu-notebook').addEventListener('change', e => this.loadNotebookPrompt(e.target.value));
+    on('prompt_menu-notebook', 'change', e => this.loadNotebookPrompt(e.target.value));
 
     // Image generation
-    $('btn-generate-image').addEventListener('click', () => this.generateImage());
-    $('btn-load-image-model').addEventListener('click', () => this.loadImageModel());
-    $('image_llm_variations').addEventListener('change', e => {
-      $('image_llm_variations_prompt').classList.toggle('hidden', !e.target.checked);
-    });
+    on('btn-generate-image', 'click', () => this.generateImage());
+    on('btn-load-image-model', 'click', () => this.loadImageModel());
+    const imgVar = $('image_llm_variations');
+    if (imgVar) {
+      imgVar.addEventListener('change', e => {
+        const prompt = $('image_llm_variations_prompt');
+        if (prompt) prompt.classList.toggle('hidden', !e.target.checked);
+      });
+    }
 
     // Session
-    $('btn-save-settings').addEventListener('click', () => this.saveAllSettings());
+    on('btn-save-settings', 'click', () => this.saveAllSettings());
 
     // Grammar file selection
-    $('grammar_file').addEventListener('change', e => this.loadGrammar(e.target.value));
+    on('grammar_file', 'change', e => this.loadGrammar(e.target.value));
 
     // Mode change
-    $('mode').addEventListener('change', () => this.debounceSave());
+    on('mode', 'change', () => this.debounceSave());
 
     // Auto-save on input changes
     document.querySelectorAll('.ss2-input, .ss2-textarea, .ss2-select, input[type="checkbox"]').forEach(el => {
@@ -155,7 +221,7 @@ const App = {
     });
 
     // Chat search
-    $('search-chat').addEventListener('input', () => this.loadPastChats());
+    on('search-chat', 'input', () => this.loadPastChats());
   },
 
   // ══════════════════════════════════════════════
@@ -237,6 +303,7 @@ const App = {
     const dot = document.getElementById('model-dot');
     const name = document.getElementById('model-name-display');
     const infoDiv = document.getElementById('model-info');
+    if (!dot || !name) return;
     if (info && info.is_loaded) {
       dot.classList.add('loaded');
       name.textContent = info.model_name;
@@ -249,88 +316,57 @@ const App = {
   },
 
   // ══════════════════════════════════════════════
-  //  WEBSOCKET
+  //  CHAT FUNCTIONS
   // ══════════════════════════════════════════════
-  connectChatSocket() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.chatSocket = new WebSocket(`${proto}://${location.host}/api/ws/chat`);
-    this.chatSocket.onmessage = e => this.handleChatMessage(JSON.parse(e.data));
-    this.chatSocket.onclose = () => setTimeout(() => this.connectChatSocket(), 3000);
-    this.chatSocket.onerror = () => {};
+  async sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text = (input?.value || '').trim();
+    if (!text || this.isGenerating) return;
+    input.value = '';
+    this.setGenerating(true);
+
+    await this.streamPost('/api/chat/generate', {
+      action: 'send',
+      text: text,
+      params: { ...this.gatherSettings(), unique_id: this.uniqueId }
+    }, msg => this.handleChatMessage(msg));
+
+    this.setGenerating(false);
+    this.loadPastChats();
   },
 
-  connectNotebookSocket() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    this.notebookSocket = new WebSocket(`${proto}://${location.host}/api/ws/notebook`);
-    this.notebookSocket.onmessage = e => this.handleNotebookMessage(JSON.parse(e.data));
-    this.notebookSocket.onclose = () => setTimeout(() => this.connectNotebookSocket(), 3000);
-    this.notebookSocket.onerror = () => {};
+  async chatAction(action) {
+    if (this.isGenerating && action !== 'stop') return;
+    this.setGenerating(true);
+
+    await this.streamPost('/api/chat/generate', {
+      action: action,
+      text: '',
+      params: { ...this.gatherSettings(), unique_id: this.uniqueId }
+    }, msg => this.handleChatMessage(msg));
+
+    this.setGenerating(false);
+    this.loadPastChats();
   },
 
   handleChatMessage(msg) {
-    if (msg.type === 'stream') {
+    if (msg.type === 'stream' || msg.type === 'done') {
       if (msg.history) {
         this.chatHistory = msg.history;
         this.renderChatMessages(msg.history);
       }
-    } else if (msg.type === 'done') {
-      this.setGenerating(false);
-      if (msg.history) {
-        this.chatHistory = msg.history;
-        this.renderChatMessages(msg.history);
-      }
-      this.loadPastChats();
     } else if (msg.type === 'error') {
-      this.setGenerating(false);
       this.notify('Error: ' + msg.error, 'error');
-    } else if (msg.type === 'stopped') {
-      this.setGenerating(false);
     }
   },
 
   handleNotebookMessage(msg) {
     const ta = document.getElementById('textbox-notebook');
-    if (msg.type === 'stream') {
-      ta.value = msg.text || '';
-    } else if (msg.type === 'done') {
-      this.setGenerating(false);
+    if (!ta) return;
+    if (msg.type === 'stream' || msg.type === 'done') {
       ta.value = msg.text || '';
     } else if (msg.type === 'error') {
-      this.setGenerating(false);
       this.notify('Error: ' + msg.error, 'error');
-    } else if (msg.type === 'stopped') {
-      this.setGenerating(false);
-    }
-  },
-
-  // ══════════════════════════════════════════════
-  //  CHAT FUNCTIONS
-  // ══════════════════════════════════════════════
-  sendMessage() {
-    const input = document.getElementById('chat-input');
-    const text = input.value.trim();
-    if (!text || this.isGenerating) return;
-    input.value = '';
-    this.setGenerating(true);
-
-    if (this.chatSocket && this.chatSocket.readyState === WebSocket.OPEN) {
-      this.chatSocket.send(JSON.stringify({
-        action: 'send',
-        text: text,
-        params: { ...this.gatherSettings(), unique_id: this.uniqueId }
-      }));
-    }
-  },
-
-  chatAction(action) {
-    if (this.isGenerating && action !== 'stop') return;
-    this.setGenerating(true);
-    if (this.chatSocket && this.chatSocket.readyState === WebSocket.OPEN) {
-      this.chatSocket.send(JSON.stringify({
-        action: action,
-        text: '',
-        params: { ...this.gatherSettings(), unique_id: this.uniqueId }
-      }));
     }
   },
 
@@ -339,11 +375,6 @@ const App = {
     this.chatHistory.visible.pop();
     this.chatHistory.internal.pop();
     this.renderChatMessages(this.chatHistory);
-    // Save
-    if (this.uniqueId) {
-      const s = this.gatherSettings();
-      // We'd need a save endpoint; for now just re-render
-    }
   },
 
   async newChat() {
@@ -357,13 +388,12 @@ const App = {
   },
 
   stopGeneration() {
+    // Abort any in-flight stream
+    if (this._abortController) {
+      this._abortController.abort();
+    }
+    // Also tell the server
     this.api('POST', '/api/chat/stop');
-    if (this.chatSocket && this.chatSocket.readyState === WebSocket.OPEN) {
-      this.chatSocket.send(JSON.stringify({ action: 'stop' }));
-    }
-    if (this.notebookSocket && this.notebookSocket.readyState === WebSocket.OPEN) {
-      this.notebookSocket.send(JSON.stringify({ action: 'stop' }));
-    }
     this.setGenerating(false);
   },
 
@@ -371,6 +401,7 @@ const App = {
     const data = await this.api('GET', '/api/chat/histories');
     if (!data || !data.histories) return;
     const list = document.getElementById('chat-list');
+    if (!list) return;
     const search = (document.getElementById('search-chat')?.value || '').toLowerCase();
 
     list.innerHTML = '';
@@ -405,6 +436,7 @@ const App = {
 
   renderChatMessages(history) {
     const container = document.getElementById('chat-messages');
+    if (!container) return;
     if (!history || !history.visible || history.visible.length === 0) {
       container.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px">No messages yet. Type something to begin.</div>';
       return;
@@ -452,27 +484,28 @@ const App = {
   // ══════════════════════════════════════════════
   //  NOTEBOOK FUNCTIONS
   // ══════════════════════════════════════════════
-  generateNotebook() {
+  async generateNotebook() {
     const ta = document.getElementById('textbox-notebook');
-    if (this.isGenerating) return;
+    if (!ta || this.isGenerating) return;
     this.setGenerating(true);
-    if (this.notebookSocket && this.notebookSocket.readyState === WebSocket.OPEN) {
-      this.notebookSocket.send(JSON.stringify({
-        action: 'generate',
-        text: ta.value,
-        params: this.gatherSettings()
-      }));
-    }
+
+    await this.streamPost('/api/notebook/generate', {
+      text: ta.value,
+      params: this.gatherSettings()
+    }, msg => this.handleNotebookMessage(msg));
+
+    this.setGenerating(false);
   },
 
   continueNotebook() {
-    this.generateNotebook(); // Same action, server handles continuation
+    this.generateNotebook();
   },
 
   async loadNotebookPrompt(name) {
     const data = await this.api('GET', `/api/prompts/${encodeURIComponent(name)}`);
     if (data && data.text !== undefined) {
-      document.getElementById('textbox-notebook').value = data.text;
+      const ta = document.getElementById('textbox-notebook');
+      if (ta) ta.value = data.text;
     }
   },
 
@@ -486,8 +519,8 @@ const App = {
   },
 
   async loadModel() {
-    const model = document.getElementById('model_menu').value;
-    const loader = document.getElementById('loader').value;
+    const model = document.getElementById('model_menu')?.value;
+    const loader = document.getElementById('loader')?.value;
     if (!model) return;
     this.notify('Loading model: ' + model, 'info');
     this.setGenerating(true);
@@ -591,7 +624,8 @@ const App = {
     if (!name || name === 'None') return;
     const data = await this.api('GET', `/api/templates/${encodeURIComponent(name)}`);
     if (data && data.instruction_template) {
-      document.getElementById('instruction_template_str').value = data.instruction_template;
+      const el = document.getElementById('instruction_template_str');
+      if (el) el.value = data.instruction_template;
     }
   },
 
@@ -601,9 +635,11 @@ const App = {
   },
 
   async loadGrammar(name) {
-    if (!name || name === 'None') { document.getElementById('grammar_string').value = ''; return; }
+    const el = document.getElementById('grammar_string');
+    if (!el) return;
+    if (!name || name === 'None') { el.value = ''; return; }
     const data = await this.api('GET', `/api/grammars/${encodeURIComponent(name)}`);
-    if (data && data.content) document.getElementById('grammar_string').value = data.content;
+    if (data && data.content) el.value = data.content;
   },
 
   async loadChatStyleList() {
@@ -642,6 +678,7 @@ const App = {
     const data = await this.api('GET', '/api/extensions/list');
     if (!data) return;
     const container = document.getElementById('extensions-list');
+    if (!container) return;
     container.innerHTML = '';
     data.available.forEach(name => {
       const label = document.createElement('label');
@@ -676,12 +713,14 @@ const App = {
     this.setGenerating(false);
     if (data && data.images) {
       const gallery = document.getElementById('image-gallery');
-      gallery.innerHTML = '';
-      data.images.forEach(src => {
-        const img = document.createElement('img');
-        img.src = src;
-        gallery.appendChild(img);
-      });
+      if (gallery) {
+        gallery.innerHTML = '';
+        data.images.forEach(src => {
+          const img = document.createElement('img');
+          img.src = src;
+          gallery.appendChild(img);
+        });
+      }
       this.notify('Image generated.', 'success');
     } else {
       this.notify('Image generation failed: ' + (data?.error || 'unknown'), 'error');
@@ -709,9 +748,12 @@ const App = {
   // ══════════════════════════════════════════════
   setGenerating(state) {
     this.isGenerating = state;
-    document.getElementById('gen-indicator').classList.toggle('active', state);
-    document.getElementById('btn-send').disabled = state;
-    document.getElementById('status-gen').textContent = state ? 'GENERATING...' : '';
+    const ind = document.getElementById('gen-indicator');
+    const btn = document.getElementById('btn-send');
+    const status = document.getElementById('status-gen');
+    if (ind) ind.classList.toggle('active', state);
+    if (btn) btn.disabled = state;
+    if (status) status.textContent = state ? 'GENERATING...' : '';
   },
 
   populateSelect(id, options, selected) {
@@ -729,6 +771,7 @@ const App = {
 
   notify(msg, type = 'info') {
     const container = document.getElementById('notifications');
+    if (!container) return;
     const div = document.createElement('div');
     div.className = 'notification ' + type;
     div.textContent = msg;

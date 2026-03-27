@@ -12,8 +12,8 @@ from pathlib import Path
 from threading import Thread
 
 import yaml
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import modules.shared as shared
 from modules.logging_colors import logger
@@ -87,8 +87,7 @@ async def get_status():
     """System status with model info."""
     return JSONResponse({
         'model': _get_model_info(),
-        'settings': {k: v for k, v in shared.settings.items()
-                     if not k.endswith('_str') and k != 'chat-instruct_command'},
+        'settings': dict(shared.settings),
     })
 
 
@@ -516,154 +515,102 @@ async def get_loader_params(name: str):
     return JSONResponse({'error': 'loader not found'}, status_code=404)
 
 
-# ─────────────────── WebSocket: Chat Generation ──────────────
+# ─────────────── Streaming: Chat Generation ──────────────
 
-@router.websocket("/ws/chat")
-async def ws_chat(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_json()
-            action = data.get('action', 'send')
-            params = data.get('params', {})
-            text = data.get('text', '')
+@router.post("/chat/generate")
+async def chat_generate(request: Request):
+    """Stream chat generation as newline-delimited JSON."""
+    data = await request.json()
+    action = data.get('action', 'send')
+    params = data.get('params', {})
+    text = data.get('text', '')
 
-            state = _build_state(params)
+    state = _build_state(params)
 
-            # Load history if unique_id provided
-            if params.get('unique_id'):
-                from modules.chat import load_history
-                character = state.get('character_menu', state.get('character', 'Assistant'))
-                mode = state.get('mode', 'instruct')
-                state['history'] = load_history(params['unique_id'], character, mode)
+    # Load history if unique_id provided
+    character = state.get('character_menu', state.get('character', 'Assistant'))
+    mode = state.get('mode', 'instruct')
+    if params.get('unique_id'):
+        from modules.chat import load_history
+        state['history'] = load_history(params['unique_id'], character, mode)
 
-            shared.stop_everything = False
+    shared.stop_everything = False
 
-            try:
-                if action == 'send':
-                    from modules.chat import generate_chat_reply, save_history
-                    for history in generate_chat_reply(text, state, loading_message=False):
-                        visible = history.get('visible', [])
-                        last_reply = visible[-1][1] if visible else ''
-                        await websocket.send_json({
-                            'type': 'stream',
-                            'text': last_reply,
-                            'history': history,
-                        })
+    def generate():
+        try:
+            if action in ('send', 'regenerate', 'continue'):
+                from modules.chat import generate_chat_reply, save_history
 
-                    # Save history
-                    if not shared.args.multi_user and params.get('unique_id'):
-                        save_history(history, params['unique_id'], character, mode)
-
-                    await websocket.send_json({'type': 'done', 'history': history})
-
-                elif action == 'regenerate':
-                    from modules.chat import generate_chat_reply, save_history
-                    for history in generate_chat_reply('', state, regenerate=True, loading_message=False):
-                        visible = history.get('visible', [])
-                        last_reply = visible[-1][1] if visible else ''
-                        await websocket.send_json({
-                            'type': 'stream',
-                            'text': last_reply,
-                            'history': history,
-                        })
-
-                    if not shared.args.multi_user and params.get('unique_id'):
-                        save_history(history, params['unique_id'], character, mode)
-
-                    await websocket.send_json({'type': 'done', 'history': history})
-
+                kwargs = {'loading_message': False}
+                if action == 'regenerate':
+                    kwargs['regenerate'] = True
+                    text_arg = ''
                 elif action == 'continue':
-                    from modules.chat import generate_chat_reply, save_history
-                    for history in generate_chat_reply('', state, _continue=True, loading_message=False):
-                        visible = history.get('visible', [])
-                        last_reply = visible[-1][1] if visible else ''
-                        await websocket.send_json({
-                            'type': 'stream',
-                            'text': last_reply,
-                            'history': history,
-                        })
+                    kwargs['_continue'] = True
+                    text_arg = ''
+                else:
+                    text_arg = text
 
-                    if not shared.args.multi_user and params.get('unique_id'):
-                        save_history(history, params['unique_id'], character, mode)
+                history = None
+                for history in generate_chat_reply(text_arg, state, **kwargs):
+                    yield json.dumps({'type': 'stream', 'history': history}) + '\n'
 
-                    await websocket.send_json({'type': 'done', 'history': history})
+                if history and not shared.args.multi_user and params.get('unique_id'):
+                    save_history(history, params['unique_id'], character, mode)
 
-                elif action == 'impersonate':
-                    from modules.chat import generate_chat_prompt
-                    from modules.text_generation import generate_reply
+                yield json.dumps({'type': 'done', 'history': history}) + '\n'
 
-                    prompt = generate_chat_prompt('', state, impersonate=True)
-                    stopping_strings = _get_stopping_strings(state)
-                    reply_text = ''
-                    for reply in generate_reply(prompt, state, stopping_strings=stopping_strings, is_chat=True):
-                        reply_text = reply.lstrip(' ')
-                        await websocket.send_json({
-                            'type': 'stream',
-                            'text': reply_text,
-                        })
-
-                    await websocket.send_json({'type': 'done', 'text': reply_text})
-
-                elif action == 'stop':
-                    shared.stop_everything = True
-                    await websocket.send_json({'type': 'stopped'})
-
-            except Exception as e:
-                logger.exception("WebSocket chat error")
-                await websocket.send_json({'type': 'error', 'error': str(e)})
-
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.exception("WebSocket connection error")
-
-
-# ─────────────── WebSocket: Notebook Generation ──────────────
-
-@router.websocket("/ws/notebook")
-async def ws_notebook(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_json()
-            action = data.get('action', 'generate')
-            params = data.get('params', {})
-            text = data.get('text', '')
-
-            state = _build_state(params)
-            shared.stop_everything = False
-
-            try:
+            elif action == 'impersonate':
+                from modules.chat import generate_chat_prompt
                 from modules.text_generation import generate_reply
 
-                if action == 'generate':
-                    full_reply = text if not shared.is_seq2seq else ''
-                    for reply in generate_reply(text, state, is_chat=False, escape_html=True):
-                        if not shared.is_seq2seq:
-                            full_reply = text + reply
-                        else:
-                            full_reply = reply
+                prompt = generate_chat_prompt('', state, impersonate=True)
+                stopping_strings = _get_stopping_strings(state)
+                reply_text = ''
+                for reply in generate_reply(prompt, state, stopping_strings=stopping_strings, is_chat=True):
+                    reply_text = reply.lstrip(' ')
+                    yield json.dumps({'type': 'stream', 'text': reply_text}) + '\n'
 
-                        await websocket.send_json({
-                            'type': 'stream',
-                            'text': full_reply,
-                        })
+                yield json.dumps({'type': 'done', 'text': reply_text}) + '\n'
 
-                    await websocket.send_json({'type': 'done', 'text': full_reply})
+        except Exception as e:
+            logger.exception("Chat generation error")
+            yield json.dumps({'type': 'error', 'error': str(e)}) + '\n'
 
-                elif action == 'stop':
-                    shared.stop_everything = True
-                    await websocket.send_json({'type': 'stopped'})
+    return StreamingResponse(generate(), media_type='application/x-ndjson')
 
-            except Exception as e:
-                logger.exception("WebSocket notebook error")
-                await websocket.send_json({'type': 'error', 'error': str(e)})
 
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.exception("WebSocket connection error")
+# ─────────────── Streaming: Notebook Generation ──────────────
+
+@router.post("/notebook/generate")
+async def notebook_generate(request: Request):
+    """Stream notebook generation as newline-delimited JSON."""
+    data = await request.json()
+    params = data.get('params', {})
+    text = data.get('text', '')
+
+    state = _build_state(params)
+    shared.stop_everything = False
+
+    def generate():
+        try:
+            from modules.text_generation import generate_reply
+
+            full_reply = text if not shared.is_seq2seq else ''
+            for reply in generate_reply(text, state, is_chat=False, escape_html=True):
+                if not shared.is_seq2seq:
+                    full_reply = text + reply
+                else:
+                    full_reply = reply
+                yield json.dumps({'type': 'stream', 'text': full_reply}) + '\n'
+
+            yield json.dumps({'type': 'done', 'text': full_reply}) + '\n'
+
+        except Exception as e:
+            logger.exception("Notebook generation error")
+            yield json.dumps({'type': 'error', 'error': str(e)}) + '\n'
+
+    return StreamingResponse(generate(), media_type='application/x-ndjson')
 
 
 def _get_stopping_strings(state):
