@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SHODAN-NET // Text Generation Interface</title>
+<link rel="stylesheet" href="/static/css/system-shock.css">
+<style>/* inline critical path */body{visibility:hidden}.loaded body{visibility:visible}</style>
+</head>
+<body>
+<div id="scanline"></div>
+<div id="notifications"></div>
+
+<div id="app">
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header id="header">
+  <div class="logo">SHODAN-NET <span>// Text Generation Interface</span></div>
+  <div id="model-status">
+    <div class="dot" id="model-dot"></div>
+    <span class="model-name" id="model-name-display">No model loaded</span>
+    <div class="generating-indicator" id="gen-indicator">
+      <div class="loading-spinner"></div> GENERATING
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<nav id="sidebar">
+  <button class="nav-btn active" data-tab="chat"><span class="num">1</span><span>Comms</span></button>
+  <button class="nav-btn" data-tab="notebook"><span class="num">2</span><span>Datalog</span></button>
+  <button class="nav-btn" data-tab="params"><span class="num">3</span><span>Params</span></button>
+  <button class="nav-btn" data-tab="character"><span class="num">4</span><span>Profile</span></button>
+  <button class="nav-btn" data-tab="model"><span class="num">5</span><span>System</span></button>
+  <button class="nav-btn" data-tab="imaging"><span class="num">6</span><span>Imaging</span></button>
+  <button class="nav-btn" data-tab="training"><span class="num">7</span><span>Train</span></button>
+  <button class="nav-btn" data-tab="session"><span class="num">8</span><span>Config</span></button>
+</nav>
+
+<!-- ═══════════════ MAIN CONTENT ═══════════════ -->
+<div id="main-content">
+
+<!-- ───────── TAB: CHAT ───────── -->
+<div id="tab-chat" class="tab-panel active">
+  <div class="chat-layout">
+    <!-- Past chats sidebar -->
+    <div class="chat-sidebar">
+      <div class="chat-sidebar-header">
+        <span>Past Chats</span>
+        <button class="ss2-button small" id="btn-new-chat" title="New Chat">+</button>
+      </div>
+      <input type="text" class="ss2-input" id="search-chat" placeholder="Search..." style="margin:4px;width:calc(100% - 8px);padding:4px 8px;font-size:11px">
+      <div class="chat-list" id="chat-list"></div>
+    </div>
+
+    <!-- Chat main -->
+    <div class="chat-main">
+      <!-- Toolbar -->
+      <div class="chat-toolbar">
+        <button class="ss2-button small" id="btn-regenerate">Regen</button>
+        <button class="ss2-button small" id="btn-continue">Continue</button>
+        <button class="ss2-button small" id="btn-remove-last">Remove Last</button>
+        <button class="ss2-button small" id="btn-impersonate">Impersonate</button>
+        <button class="ss2-button small danger" id="btn-stop-chat">Stop</button>
+        <div style="flex:1"></div>
+        <select class="ss2-select" id="mode" style="width:auto;min-width:130px">
+          <option value="instruct">Instruct</option>
+          <option value="chat">Chat</option>
+          <option value="chat-instruct">Chat-Instruct</option>
+        </select>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages" id="chat-messages">
+        <div style="text-align:center;color:var(--text-dim);padding:40px;">
+          Welcome to SHODAN-NET. Load a model and begin.
+        </div>
+      </div>
+
+      <!-- Chat options -->
+      <div class="chat-options">
+        <label class="ss2-checkbox"><input type="checkbox" id="enable_web_search"> Web Search</label>
+        <label class="ss2-label" style="margin:0">Start with:</label>
+        <input type="text" class="ss2-input" id="start_with" style="width:200px;padding:4px 8px;font-size:11px" placeholder="Optional prefix...">
+      </div>
+
+      <!-- Input area -->
+      <div id="chat-input-area">
+        <div class="input-row">
+          <textarea class="ss2-textarea" id="chat-input" rows="3" placeholder="Enter your message..."></textarea>
+          <button class="ss2-button primary" id="btn-send" style="height:60px">SEND</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: NOTEBOOK ───────── -->
+<div id="tab-notebook" class="tab-panel">
+  <div class="ss2-panel">
+    <div class="ss2-panel-title">Datalog // Text Completion</div>
+    <div class="form-row">
+      <label class="ss2-label">Prompt</label>
+      <select class="ss2-select" id="prompt_menu-notebook" style="width:200px"></select>
+      <button class="ss2-button small" id="btn-new-prompt">New</button>
+      <button class="ss2-button small danger" id="btn-delete-prompt">Del</button>
+    </div>
+    <textarea class="ss2-textarea" id="textbox-notebook" rows="20" style="min-height:400px"></textarea>
+    <div class="btn-group mt-sm">
+      <button class="ss2-button primary" id="btn-generate-notebook">Generate</button>
+      <button class="ss2-button" id="btn-continue-notebook">Continue</button>
+      <button class="ss2-button danger" id="btn-stop-notebook">Stop</button>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: PARAMETERS ───────── -->
+<div id="tab-params" class="tab-panel">
+  <!-- Preset selector -->
+  <div class="ss2-panel">
+    <div class="ss2-panel-title">Preset Management</div>
+    <div class="form-row">
+      <select class="ss2-select" id="preset_menu" style="flex:2"></select>
+      <button class="ss2-button small" id="btn-load-preset">Load</button>
+      <button class="ss2-button small" id="btn-save-preset">Save</button>
+      <button class="ss2-button small danger" id="btn-delete-preset">Del</button>
+    </div>
+  </div>
+
+  <div class="params-grid">
+    <!-- Left column -->
+    <div>
+      <!-- Curve Shape -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Curve Shape</div>
+        <div class="slider-row"><span class="ss2-label">Temperature</span><input type="range" id="temperature" min="0.01" max="5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">DynaTemp Low</span><input type="range" id="dynatemp_low" min="0.01" max="5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">DynaTemp High</span><input type="range" id="dynatemp_high" min="0.01" max="5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">DynaTemp Exp</span><input type="range" id="dynatemp_exponent" min="0.01" max="5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">Smooth Factor</span><input type="range" id="smoothing_factor" min="0" max="10" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Smooth Curve</span><input type="range" id="smoothing_curve" min="1" max="10" step="0.01" value="1"><span class="slider-val">1</span></div>
+      </div>
+
+      <!-- Curve Cutoff -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Curve Cutoff</div>
+        <div class="slider-row"><span class="ss2-label">Top P</span><input type="range" id="top_p" min="0" max="1" step="0.01" value="0.95"><span class="slider-val">0.95</span></div>
+        <div class="slider-row"><span class="ss2-label">Top K</span><input type="range" id="top_k" min="0" max="200" step="1" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Min P</span><input type="range" id="min_p" min="0" max="1" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Top N Sigma</span><input type="range" id="top_n_sigma" min="0" max="5" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Typical P</span><input type="range" id="typical_p" min="0" max="1" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">XTC Threshold</span><input type="range" id="xtc_threshold" min="0" max="0.5" step="0.01" value="0.1"><span class="slider-val">0.1</span></div>
+        <div class="slider-row"><span class="ss2-label">XTC Probability</span><input type="range" id="xtc_probability" min="0" max="1" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Epsilon Cutoff</span><input type="range" id="epsilon_cutoff" min="0" max="9" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Eta Cutoff</span><input type="range" id="eta_cutoff" min="0" max="20" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">TFS</span><input type="range" id="tfs" min="0" max="1" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">Top A</span><input type="range" id="top_a" min="0" max="1" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Adaptive Target</span><input type="range" id="adaptive_target" min="0" max="0.5" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Adaptive Decay</span><input type="range" id="adaptive_decay" min="0" max="2" step="0.01" value="0.9"><span class="slider-val">0.9</span></div>
+      </div>
+    </div>
+
+    <!-- Right column -->
+    <div>
+      <!-- Repetition Suppression -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Repetition Suppression</div>
+        <div class="slider-row"><span class="ss2-label">DRY Multiplier</span><input type="range" id="dry_multiplier" min="0" max="5" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">DRY Allowed Len</span><input type="range" id="dry_allowed_length" min="1" max="20" step="1" value="2"><span class="slider-val">2</span></div>
+        <div class="slider-row"><span class="ss2-label">DRY Base</span><input type="range" id="dry_base" min="1" max="4" step="0.01" value="1.75"><span class="slider-val">1.75</span></div>
+        <div class="slider-row"><span class="ss2-label">Rep. Penalty</span><input type="range" id="repetition_penalty" min="1" max="1.5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">Freq Penalty</span><input type="range" id="frequency_penalty" min="0" max="2" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Pres Penalty</span><input type="range" id="presence_penalty" min="0" max="2" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Enc Rep Penalty</span><input type="range" id="encoder_repetition_penalty" min="0.8" max="1.5" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">No Rep Ngram</span><input type="range" id="no_repeat_ngram_size" min="0" max="20" step="1" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Rep Pen Range</span><input type="range" id="repetition_penalty_range" min="0" max="4096" step="64" value="1024"><span class="slider-val">1024</span></div>
+      </div>
+
+      <!-- Alternative Sampling -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Alternative Sampling</div>
+        <div class="slider-row"><span class="ss2-label">Penalty Alpha</span><input type="range" id="penalty_alpha" min="0" max="5" step="0.01" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Guidance Scale</span><input type="range" id="guidance_scale" min="0.01" max="4" step="0.01" value="1"><span class="slider-val">1</span></div>
+        <div class="slider-row"><span class="ss2-label">Mirostat Mode</span><input type="range" id="mirostat_mode" min="0" max="2" step="1" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Mirostat Tau</span><input type="range" id="mirostat_tau" min="0" max="10" step="0.01" value="5"><span class="slider-val">5</span></div>
+        <div class="slider-row"><span class="ss2-label">Mirostat Eta</span><input type="range" id="mirostat_eta" min="0" max="1" step="0.01" value="0.1"><span class="slider-val">0.1</span></div>
+      </div>
+
+      <!-- Token Gen -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Token Generation</div>
+        <div class="slider-row"><span class="ss2-label">Max New Tokens</span><input type="range" id="max_new_tokens" min="1" max="4096" step="1" value="512"><span class="slider-val">512</span></div>
+        <div class="slider-row"><span class="ss2-label">Prompt Lookup</span><input type="range" id="prompt_lookup_num_tokens" min="0" max="10" step="1" value="0"><span class="slider-val">0</span></div>
+        <div class="slider-row"><span class="ss2-label">Max Tok/Sec</span><input type="range" id="max_tokens_second" min="0" max="30" step="1" value="0"><span class="slider-val">0</span></div>
+      </div>
+
+      <!-- Checkboxes -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Sampling Options</div>
+        <div class="ss2-grid cols-2">
+          <label class="ss2-checkbox"><input type="checkbox" id="do_sample" checked> do_sample</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="dynamic_temperature"> Dynamic Temp</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="temperature_last"> Temp Last</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="auto_max_new_tokens" checked> Auto Max Tokens</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="ban_eos_token"> Ban EOS</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="add_bos_token" checked> Add BOS</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="enable_thinking" checked> Enable Thinking</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="skip_special_tokens" checked> Skip Special</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="stream" checked> Stream</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="static_cache"> Static Cache</label>
+        </div>
+      </div>
+
+      <!-- More settings -->
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Advanced</div>
+        <div class="form-row"><label class="ss2-label">Reasoning Effort</label><select class="ss2-select" id="reasoning_effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+        <div class="form-row"><label class="ss2-label">Truncation Length</label><input type="number" class="ss2-input" id="truncation_length" value="8192"></div>
+        <div class="form-row"><label class="ss2-label">Seed</label><input type="number" class="ss2-input" id="seed" value="-1"></div>
+        <label class="ss2-label mt-sm">Sampler Priority</label>
+        <textarea class="ss2-textarea" id="sampler_priority" rows="6"></textarea>
+        <label class="ss2-label mt-sm">Custom Stopping Strings</label>
+        <input class="ss2-input" id="custom_stopping_strings" placeholder='e.g. "\\n", "User:"'>
+        <label class="ss2-label mt-sm">Custom Token Bans</label>
+        <input class="ss2-input" id="custom_token_bans" placeholder="Comma-separated token IDs">
+        <label class="ss2-label mt-sm">Negative Prompt</label>
+        <textarea class="ss2-textarea" id="negative_prompt" rows="2"></textarea>
+        <label class="ss2-label mt-sm">DRY Sequence Breakers</label>
+        <input class="ss2-input" id="dry_sequence_breakers" value='"\\n", ":", "\\"", "*"'>
+        <div class="form-row mt-sm"><label class="ss2-label">Grammar</label><select class="ss2-select" id="grammar_file"></select></div>
+        <textarea class="ss2-textarea" id="grammar_string" rows="4" placeholder="GBNF grammar string..."></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: CHARACTER ───────── -->
+<div id="tab-character" class="tab-panel">
+  <div class="ss2-grid cols-2">
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Character Selection</div>
+        <div class="form-row">
+          <select class="ss2-select" id="character_menu"></select>
+          <button class="ss2-button small" id="btn-refresh-chars">Refresh</button>
+        </div>
+        <div class="form-row mt-sm"><label class="ss2-label">Your Name</label><input class="ss2-input" id="name1" value="You"></div>
+        <div class="form-row"><label class="ss2-label">Bot Name</label><input class="ss2-input" id="name2" value="AI"></div>
+      </div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Character Details</div>
+        <label class="ss2-label">Context</label>
+        <textarea class="ss2-textarea" id="context" rows="6"></textarea>
+        <label class="ss2-label mt-sm">Greeting</label>
+        <textarea class="ss2-textarea" id="greeting" rows="3"></textarea>
+        <div class="btn-group mt-sm">
+          <button class="ss2-button" id="btn-save-char">Save Character</button>
+          <button class="ss2-button danger" id="btn-delete-char">Delete</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">User Settings</div>
+        <div class="form-row"><label class="ss2-label">User Profile</label><select class="ss2-select" id="user_menu"></select></div>
+        <label class="ss2-label mt-sm">User Bio</label>
+        <textarea class="ss2-textarea" id="user_bio" rows="3"></textarea>
+        <label class="ss2-label mt-sm">Custom System Message</label>
+        <textarea class="ss2-textarea" id="custom_system_message" rows="3"></textarea>
+      </div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Templates</div>
+        <div class="form-row"><label class="ss2-label">Instruction Template</label><select class="ss2-select" id="instruction_template_menu"></select><button class="ss2-button small" id="btn-load-template">Load</button></div>
+        <label class="ss2-label mt-sm">Instruction Template (Jinja2)</label>
+        <textarea class="ss2-textarea" id="instruction_template_str" rows="8" style="font-size:11px"></textarea>
+        <label class="ss2-label mt-sm">Chat Template (Jinja2)</label>
+        <textarea class="ss2-textarea" id="chat_template_str" rows="8" style="font-size:11px"></textarea>
+        <label class="ss2-label mt-sm">Chat-Instruct Command</label>
+        <textarea class="ss2-textarea" id="chat-instruct_command" rows="3"></textarea>
+        <div class="form-row mt-sm"><label class="ss2-label">Chat Style</label><select class="ss2-select" id="chat_style"></select></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: MODEL ───────── -->
+<div id="tab-model" class="tab-panel">
+  <div class="model-controls">
+    <div class="ss2-panel">
+      <div class="ss2-panel-title">Model Selection</div>
+      <div class="form-row">
+        <select class="ss2-select" id="model_menu"></select>
+        <button class="ss2-button small" id="btn-refresh-models">Refresh</button>
+      </div>
+      <div class="form-row mt-sm">
+        <label class="ss2-label">Loader</label>
+        <select class="ss2-select" id="loader">
+          <option value="llama.cpp">llama.cpp</option>
+          <option value="Transformers">Transformers</option>
+          <option value="ExLlamav3_HF">ExLlamav3_HF</option>
+          <option value="ExLlamav3">ExLlamav3</option>
+          <option value="TensorRT-LLM">TensorRT-LLM</option>
+        </select>
+      </div>
+      <div class="btn-group mt-sm">
+        <button class="ss2-button primary" id="btn-load-model">Load Model</button>
+        <button class="ss2-button danger" id="btn-unload-model">Unload</button>
+      </div>
+    </div>
+    <div class="ss2-panel">
+      <div class="ss2-panel-title">Model Parameters</div>
+      <div class="form-row"><label class="ss2-label">GPU Layers</label><input type="number" class="ss2-input" id="gpu_layers" value="-1"></div>
+      <div class="form-row"><label class="ss2-label">Context Size</label><input type="number" class="ss2-input" id="ctx_size" value="0"></div>
+      <div class="form-row"><label class="ss2-label">Cache Type</label><input class="ss2-input" id="cache_type" value="fp16"></div>
+      <div class="form-row"><label class="ss2-label">Attention</label><select class="ss2-select" id="attn_implementation"><option value="sdpa">sdpa</option><option value="eager">eager</option><option value="flash_attention_2">flash_attention_2</option></select></div>
+    </div>
+    <div class="ss2-panel">
+      <div class="ss2-panel-title">LoRA</div>
+      <div class="form-row">
+        <select class="ss2-select" id="lora_menu"></select>
+        <button class="ss2-button small" id="btn-load-lora">Apply</button>
+      </div>
+    </div>
+    <div class="ss2-panel">
+      <div class="ss2-panel-title">Model Info</div>
+      <div class="vram-info" id="model-info">No model loaded.</div>
+    </div>
+    <div class="ss2-panel full-width">
+      <div class="ss2-accordion" id="advanced-model-options">
+        <div class="ss2-accordion-header" onclick="this.parentElement.classList.toggle('open')">
+          Advanced Options <span class="arrow">&#9654;</span>
+        </div>
+        <div class="ss2-accordion-body">
+          <div class="ss2-grid cols-2">
+            <div class="form-row"><label class="ss2-label">Tensor Split</label><input class="ss2-input" id="tensor_split" placeholder="e.g. 60,40"></div>
+            <div class="form-row"><label class="ss2-label">Batch Size</label><input type="number" class="ss2-input" id="batch_size" value="1024"></div>
+            <div class="form-row"><label class="ss2-label">UBatch Size</label><input type="number" class="ss2-input" id="ubatch_size" value="1024"></div>
+            <div class="form-row"><label class="ss2-label">Threads</label><input type="number" class="ss2-input" id="threads" value="0"></div>
+            <div class="form-row"><label class="ss2-label">Parallel Slots</label><input type="number" class="ss2-input" id="parallel" value="1"></div>
+            <div class="form-row"><label class="ss2-label">GPU Split (ExL)</label><input class="ss2-input" id="gpu_split" placeholder="e.g. 20,7,7"></div>
+            <div class="form-row"><label class="ss2-label">mmproj</label><select class="ss2-select" id="mmproj"></select></div>
+            <div class="form-row"><label class="ss2-label">Fit Target (MiB)</label><input class="ss2-input" id="fit_target" value="512"></div>
+          </div>
+          <div class="ss2-grid cols-3 mt-sm">
+            <label class="ss2-checkbox"><input type="checkbox" id="cpu"> CPU Only</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="load_in_8bit"> Load 8-bit</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="load_in_4bit"> Load 4-bit</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="bf16"> BF16</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="no_mmap"> No MMap</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="mlock"> MLock</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="streaming_llm"> Streaming LLM</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="enable_tp"> Tensor Parallel</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="row_split"> Row Split</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="no_kv_offload"> No KV Offload</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="numa"> NUMA</label>
+            <label class="ss2-checkbox"><input type="checkbox" id="trust_remote_code"> Trust Remote Code</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: IMAGING ───────── -->
+<div id="tab-imaging" class="tab-panel">
+  <div class="ss2-grid cols-2">
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Image Generation</div>
+        <label class="ss2-label">Prompt</label>
+        <textarea class="ss2-textarea" id="image_prompt" rows="4"></textarea>
+        <label class="ss2-label mt-sm">Negative Prompt</label>
+        <textarea class="ss2-textarea" id="image_neg_prompt" rows="2"></textarea>
+        <div class="ss2-grid cols-2 mt-sm">
+          <div class="form-row"><label class="ss2-label">Width</label><input type="number" class="ss2-input" id="image_width" value="1024"></div>
+          <div class="form-row"><label class="ss2-label">Height</label><input type="number" class="ss2-input" id="image_height" value="1024"></div>
+        </div>
+        <div class="form-row"><label class="ss2-label">Aspect Ratio</label><select class="ss2-select" id="image_aspect_ratio"><option>1:1 Square</option><option>16:9 Wide</option><option>9:16 Tall</option><option>4:3</option><option>Custom</option></select></div>
+        <div class="slider-row mt-sm"><span class="ss2-label">Steps</span><input type="range" id="image_steps" min="1" max="50" step="1" value="9"><span class="slider-val">9</span></div>
+        <div class="slider-row"><span class="ss2-label">CFG Scale</span><input type="range" id="image_cfg_scale" min="0" max="20" step="0.5" value="0"><span class="slider-val">0</span></div>
+        <div class="form-row"><label class="ss2-label">Seed</label><input type="number" class="ss2-input" id="image_seed" value="-1"></div>
+        <div class="ss2-grid cols-2 mt-sm">
+          <div class="form-row"><label class="ss2-label">Batch Size</label><input type="number" class="ss2-input" id="image_batch_size" value="1"></div>
+          <div class="form-row"><label class="ss2-label">Batch Count</label><input type="number" class="ss2-input" id="image_batch_count" value="1"></div>
+        </div>
+        <label class="ss2-checkbox mt-sm"><input type="checkbox" id="image_llm_variations"> LLM Variations</label>
+        <textarea class="ss2-textarea hidden" id="image_llm_variations_prompt" rows="3"></textarea>
+        <button class="ss2-button primary mt-sm w-full" id="btn-generate-image">Generate Image</button>
+      </div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Image Model</div>
+        <div class="form-row"><select class="ss2-select" id="image_model_menu"></select><button class="ss2-button small" id="btn-load-image-model">Load</button></div>
+        <div class="form-row mt-sm"><label class="ss2-label">Dtype</label><select class="ss2-select" id="image_dtype"><option value="bfloat16">bfloat16</option><option value="float16">float16</option></select></div>
+        <div class="form-row"><label class="ss2-label">Attention</label><select class="ss2-select" id="image_attn_backend"><option value="flash_attention_2">flash_attention_2</option><option value="sdpa">sdpa</option></select></div>
+        <label class="ss2-checkbox"><input type="checkbox" id="image_compile"> Compile</label>
+        <label class="ss2-checkbox"><input type="checkbox" id="image_cpu_offload"> CPU Offload</label>
+        <div class="form-row mt-sm"><label class="ss2-label">Quantization</label><select class="ss2-select" id="image_quant"><option value="none">None</option><option value="bnb-8bit">bnb-8bit</option><option value="bnb-4bit">bnb-4bit</option></select></div>
+      </div>
+    </div>
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Gallery</div>
+        <div class="image-gallery" id="image-gallery">
+          <div style="color:var(--text-dim);text-align:center;padding:40px">No images generated yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: TRAINING ───────── -->
+<div id="tab-training" class="tab-panel">
+  <div class="ss2-grid cols-2">
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">LoRA Training</div>
+        <div class="form-row"><label class="ss2-label">LoRA Name</label><input class="ss2-input" id="lora_name" placeholder="my-lora"></div>
+        <div class="ss2-grid cols-3">
+          <div class="form-row"><label class="ss2-label">Rank</label><input type="number" class="ss2-input" id="lora_rank" value="32"></div>
+          <div class="form-row"><label class="ss2-label">Alpha</label><input type="number" class="ss2-input" id="lora_alpha" value="64"></div>
+          <div class="form-row"><label class="ss2-label">Dropout</label><input type="number" class="ss2-input" id="lora_dropout" value="0.05" step="0.01"></div>
+        </div>
+        <label class="ss2-label mt-sm">Target Modules</label>
+        <div class="ss2-grid cols-3">
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_q_proj" checked> q_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_v_proj" checked> v_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_k_proj"> k_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_o_proj"> o_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_gate_proj"> gate_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_down_proj"> down_proj</label>
+          <label class="ss2-checkbox"><input type="checkbox" id="tgt_up_proj"> up_proj</label>
+        </div>
+      </div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Training Parameters</div>
+        <div class="form-row"><label class="ss2-label">Dataset</label><select class="ss2-select" id="training_dataset"><option>None</option></select></div>
+        <div class="ss2-grid cols-2">
+          <div class="form-row"><label class="ss2-label">Epochs</label><input type="number" class="ss2-input" id="train_epochs" value="3"></div>
+          <div class="form-row"><label class="ss2-label">Learning Rate</label><input class="ss2-input" id="train_lr" value="3e-4"></div>
+          <div class="form-row"><label class="ss2-label">Batch Size</label><input type="number" class="ss2-input" id="train_batch_size" value="128"></div>
+          <div class="form-row"><label class="ss2-label">Warmup Steps</label><input type="number" class="ss2-input" id="train_warmup" value="100"></div>
+        </div>
+        <div class="form-row mt-sm"><label class="ss2-label">Optimizer</label><select class="ss2-select" id="train_optimizer"><option>adamw_torch</option><option>adamw_hf</option><option>adafactor</option><option>sgd</option></select></div>
+        <div class="form-row"><label class="ss2-label">LR Scheduler</label><select class="ss2-select" id="train_scheduler"><option>linear</option><option>constant</option><option>cosine</option><option>polynomial</option></select></div>
+        <label class="ss2-checkbox mt-sm"><input type="checkbox" id="train_gradient_checkpointing" checked> Gradient Checkpointing</label>
+        <div class="btn-group mt-sm">
+          <button class="ss2-button primary" id="btn-start-training">Start Training</button>
+          <button class="ss2-button danger" id="btn-stop-training">Stop</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="ss2-panel">
+        <div class="ss2-panel-title">Training Log</div>
+        <div class="training-log" id="training-log">Training not started.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────── TAB: SESSION ───────── -->
+<div id="tab-session" class="tab-panel">
+  <div class="ss2-panel" style="max-width:600px">
+    <div class="ss2-panel-title">Session Configuration</div>
+    <label class="ss2-checkbox"><input type="checkbox" id="show_two_notebook_columns"> Show Two Notebook Columns</label>
+    <label class="ss2-checkbox"><input type="checkbox" id="paste_to_attachment"> Paste to Attachment</label>
+    <label class="ss2-checkbox"><input type="checkbox" id="include_past_attachments" checked> Include Past Attachments</label>
+    <div class="btn-group mt-md">
+      <button class="ss2-button primary" id="btn-save-settings">Save Settings</button>
+    </div>
+  </div>
+  <div class="ss2-panel mt-md" style="max-width:600px">
+    <div class="ss2-panel-title">Extensions</div>
+    <div id="extensions-list"></div>
+  </div>
+</div>
+
+</div><!-- /main-content -->
+
+<!-- ═══════════════ STATUS BAR ═══════════════ -->
+<footer id="statusbar">
+  <span id="status-left">Ready</span>
+  <span class="gen-status" id="status-gen"></span>
+  <span id="status-right">SHODAN-NET v2.0</span>
+</footer>
+
+</div><!-- /app -->
+
+<script src="/static/js/app.js"></script>
+<script>document.documentElement.classList.add('loaded')</script>
+</body>
+</html>
